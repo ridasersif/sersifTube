@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Environment variables
+.env
+
+# Downloads & Data
+downloads/
+server/downloads/
+server/archive/
+
+# Binaries
+*.exe
+server/bin/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Build output
+dist/
+build/
