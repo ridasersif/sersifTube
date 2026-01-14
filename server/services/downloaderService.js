@@ -111,7 +111,7 @@ queueManager.on('startDownload', async (task) => {
         ytdlpOptions.extractAudio = true;
         ytdlpOptions.audioFormat = 'mp3';
     } else {
-        ytdlpOptions.format = formatId ? `${formatId}+bestaudio/best` : 'bestvideo+bestaudio/best';
+        ytdlpOptions.format = formatId ? `${formatId}+bestaudio[ext=m4a]/bestaudio/best` : 'bestvideo+bestaudio[ext=m4a]/bestvideo+bestaudio/best';
         ytdlpOptions.mergeOutputFormat = 'mp4';
     }
 
