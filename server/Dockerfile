@@ -7,23 +7,28 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Create app directory
+# Create app directory and set permissions for Hugging Face user (1000)
 WORKDIR /usr/src/app
+RUN chown -R 1000:1000 /usr/src/app
+
+# Switch to non-root user
+USER 1000
 
 # Install app dependencies
-COPY package*.json ./
+COPY --chown=1000:1000 package*.json ./
 RUN npm install
 
 # Copy app source
-COPY . .
+COPY --chown=1000:1000 . .
 
 # Create downloads directory
 RUN mkdir -p downloads
 
-# Expose port
-EXPOSE 5000
+# Expose port (Hugging Face uses 7860)
+EXPOSE 7860
 
 # Start server
 # Set DOCKER_MODE to true to handle path differences if needed
 ENV DOCKER_MODE=true
+ENV PORT=7860
 CMD [ "node", "index.js" ]
