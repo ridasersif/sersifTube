@@ -4,6 +4,7 @@ import { Sidebar, Navbar } from './components/layout/Sidebar';
 import { Dashboard } from './components/layout/Dashboard';
 import { VideoItem } from './components/VideoItem';
 import { VideoPlayer } from './components/player/VideoPlayer';
+import { Modal } from './components/Modal';
 import { api } from './services/api';
 import './index.css';
 
@@ -13,10 +14,12 @@ function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [playingVideo, setPlayingVideo] = useState(null);
+  const [deleteModal, setDeleteModal] = useState({ isOpen: false, id: null, path: null });
 
   // Input states
   const [url, setUrl] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [metadata, setMetadata] = useState(null);
   const [format, setFormat] = useState('mp4');
   const [selectedFormatId, setSelectedFormatId] = useState('');
@@ -72,7 +75,7 @@ function App() {
     });
   };
 
-  // URL Analysis
+  // URL Analysis (optimized for speed)
   useEffect(() => {
     const timer = setTimeout(() => {
       if (url && (url.includes('http') || url.includes('www'))) {
@@ -80,7 +83,7 @@ function App() {
       } else {
         setMetadata(null);
       }
-    }, 800);
+    }, 400); // Reduced from 800ms for faster response
     return () => clearTimeout(timer);
   }, [url]);
 
@@ -103,7 +106,9 @@ function App() {
   };
 
   const handleDownload = async () => {
-    if (!metadata) return;
+    if (!metadata || downloading) return;
+
+    setDownloading(true);
     try {
       await api.download({
         url,
@@ -119,6 +124,8 @@ function App() {
       setMetadata(null);
     } catch (err) {
       alert('Failed: ' + err.message);
+    } finally {
+      setDownloading(false);
     }
   };
 
@@ -138,8 +145,12 @@ function App() {
   };
 
   const handleDelete = async (id, path) => {
-    if (confirm('Delete this file permanently?')) {
-      await api.deleteFile(id, path);
+    setDeleteModal({ isOpen: true, id, path });
+  };
+
+  const confirmDelete = async () => {
+    if (deleteModal.id) {
+      await api.deleteFile(deleteModal.id, deleteModal.path);
       fetchQueue();
     }
   };
@@ -186,6 +197,7 @@ function App() {
                 url={url}
                 setUrl={setUrl}
                 analyzing={analyzing}
+                downloading={downloading}
                 metadata={metadata}
                 format={format}
                 setFormat={setFormat}
@@ -253,6 +265,16 @@ function App() {
           onClose={() => setPlayingVideo(null)}
         />
       )}
+
+      <Modal
+        isOpen={deleteModal.isOpen}
+        onClose={() => setDeleteModal({ ...deleteModal, isOpen: false })}
+        onConfirm={confirmDelete}
+        title="Delete File?"
+        message="This will permanently remove the media file from your server. This action cannot be undone."
+        confirmText="Delete Permanently"
+        variant="danger"
+      />
     </div>
   );
 }

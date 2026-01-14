@@ -69,18 +69,20 @@ export const VideoItem = ({ task, onCancel, onDelete, onPause, onResume, onPlay 
                         <span className={`flex items-center gap-1.5 ${isCompleted ? 'text-emerald-400' :
                                 isFailed ? 'text-red-400' :
                                     isPaused ? 'text-amber-400' :
-                                        'text-violet-400'
+                                        isQueued ? 'text-slate-500' :
+                                            'text-violet-400'
                             }`}>
                             {isCompleted && <CheckCircle2 size={12} />}
                             {isFailed && <AlertCircle size={12} />}
                             {isPaused && <Pause size={12} className="fill-amber-400/20" />}
+                            {isQueued && <Loader2 size={12} className="animate-spin opacity-40" />}
                             {isDownloading && <Loader2 size={12} className="animate-spin" />}
 
                             {isCompleted ? 'Finished' :
                                 isFailed ? 'Error' :
-                                    isQueued ? 'Queued' :
+                                    isQueued ? 'Waiting in Queue' :
                                         isPaused ? `Paused • ${Math.round(task.progress || 0)}%` :
-                                            `Loading • ${Math.round(task.progress || 0)}%`}
+                                            `Downloading • ${Math.round(task.progress || 0)}%`}
                         </span>
                     </div>
                 </div>

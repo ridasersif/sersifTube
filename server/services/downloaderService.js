@@ -39,6 +39,8 @@ const getInfo = async (url) => {
             dumpSingleJson: true,
             noWarnings: true,
             noCheckCertificates: true,
+            flatPlaylist: true,
+            skipDownload: true,
             addHeader: ['referer:youtube.com', 'user-agent:googlebot']
         });
 

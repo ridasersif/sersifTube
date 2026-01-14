@@ -8,7 +8,7 @@ class QueueManager extends EventEmitter {
         this.active = new Map();
         this.paused = new Map();
         this.completed = new Map();
-        this.maxConcurrent = 3;
+        this.maxConcurrent = 1;
     }
 
     addToQueue(item) {

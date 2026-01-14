@@ -6,6 +6,7 @@ export const UrlInput = ({
     url,
     setUrl,
     analyzing,
+    downloading,
     metadata,
     format,
     setFormat,
@@ -117,7 +118,12 @@ export const UrlInput = ({
                                     <span className="truncate">{customPath || 'Default Downloads Folder'}</span>
                                 </div>
 
-                                <Button onClick={onDownload} className="px-8 whitespace-nowrap">
+                                <Button
+                                    onClick={onDownload}
+                                    className="px-8 whitespace-nowrap"
+                                    loading={downloading}
+                                    disabled={downloading}
+                                >
                                     Download Now
                                 </Button>
                             </div>
