@@ -113,7 +113,18 @@ queueManager.on('startDownload', async (task) => {
         ytdlpOptions.extractAudio = true;
         ytdlpOptions.audioFormat = 'mp3';
     } else {
-        ytdlpOptions.format = formatId ? `${formatId}+bestaudio[ext=m4a]/bestaudio/best` : 'bestvideo+bestaudio[ext=m4a]/bestvideo+bestaudio/best';
+        // Smart quality selection with fallback
+        const preferredQuality = options.playlistQuality;
+
+        if (preferredQuality && preferredQuality !== 'best') {
+            // Try to get the preferred quality, fallback to best if unavailable
+            // Format: bestvideo[height<=QUALITY]+bestaudio / best
+            ytdlpOptions.format = `bestvideo[height<=${preferredQuality}]+bestaudio[ext=m4a]/bestvideo[height<=${preferredQuality}]+bestaudio/bestvideo+bestaudio[ext=m4a]/best`;
+        } else if (formatId) {
+            ytdlpOptions.format = `${formatId}+bestaudio[ext=m4a]/bestaudio/best`;
+        } else {
+            ytdlpOptions.format = 'bestvideo+bestaudio[ext=m4a]/bestvideo+bestaudio/best';
+        }
         ytdlpOptions.mergeOutputFormat = 'mp4';
     }
 

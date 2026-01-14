@@ -23,6 +23,7 @@ function App() {
   const [metadata, setMetadata] = useState(null);
   const [format, setFormat] = useState('mp4');
   const [selectedFormatId, setSelectedFormatId] = useState('');
+  const [playlistQuality, setPlaylistQuality] = useState('best');
   const [customPath, setCustomPath] = useState('');
 
   // Tasks state
@@ -115,6 +116,7 @@ function App() {
         options: {
           isAudio: format === 'mp3',
           formatId: selectedFormatId,
+          playlistQuality: playlistQuality,
           title: metadata.title,
           isPlaylist: metadata.is_playlist,
           outputPath: customPath
@@ -203,6 +205,8 @@ function App() {
                 setFormat={setFormat}
                 selectedFormatId={selectedFormatId}
                 setSelectedFormatId={setSelectedFormatId}
+                playlistQuality={playlistQuality}
+                setPlaylistQuality={setPlaylistQuality}
                 customPath={customPath}
                 onBrowse={handleBrowse}
                 onDownload={handleDownload}

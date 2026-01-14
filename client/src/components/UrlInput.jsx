@@ -12,6 +12,8 @@ export const UrlInput = ({
     setFormat,
     selectedFormatId,
     setSelectedFormatId,
+    playlistQuality,
+    setPlaylistQuality,
     onDownload,
     customPath,
     onBrowse
@@ -40,6 +42,24 @@ export const UrlInput = ({
                     )}
                 </div>
             </div>
+
+            {/* Loading State */}
+            {analyzing && !metadata && (
+                <div className="bg-slate-900/80 backdrop-blur-xl border border-violet-500/20 rounded-2xl p-8 animate-in slide-in-from-bottom-4 fade-in duration-500">
+                    <div className="flex flex-col items-center justify-center gap-4 text-center">
+                        <div className="relative">
+                            <Loader2 className="w-12 h-12 text-violet-500 animate-spin" />
+                            <div className="absolute inset-0 w-12 h-12 bg-violet-500/20 rounded-full blur-xl animate-pulse" />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-bold text-white mb-2">Analyzing Link...</h3>
+                            <p className="text-slate-400 text-sm max-w-md">
+                                Please wait, this may take a moment. We're fetching video information and available formats.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Metadata Card */}
             {metadata && (
@@ -104,6 +124,27 @@ export const UrlInput = ({
                                                 </option>
                                             ))}
                                         </select>
+                                    </div>
+                                )}
+
+                                {/* Playlist Quality Selector */}
+                                {format === 'mp4' && metadata.is_playlist && (
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Playlist Quality</label>
+                                        <select
+                                            className="w-full bg-slate-800 text-white text-sm font-medium rounded-lg px-3 py-2 border border-slate-700 outline-none focus:border-violet-500 transition-colors"
+                                            value={playlistQuality}
+                                            onChange={(e) => setPlaylistQuality(e.target.value)}
+                                        >
+                                            <option value="best">Best Available</option>
+                                            <option value="1080">1080p (Full HD)</option>
+                                            <option value="720">720p (HD)</option>
+                                            <option value="480">480p (SD)</option>
+                                            <option value="360">360p</option>
+                                        </select>
+                                        <p className="text-xs text-slate-500 mt-1.5">
+                                            If unavailable, downloads best quality
+                                        </p>
                                     </div>
                                 )}
                             </div>
