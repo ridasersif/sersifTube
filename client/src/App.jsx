@@ -1,15 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import { io } from 'socket.io-client';
-import { Youtube, LayoutGrid, List, BarChart3 } from 'lucide-react';
-import { UrlInput } from './components/UrlInput';
+import { Sidebar, Navbar } from './components/layout/Sidebar';
+import { Dashboard } from './components/layout/Dashboard';
 import { VideoItem } from './components/VideoItem';
+import { VideoPlayer } from './components/player/VideoPlayer';
+import { api } from './services/api';
 import './index.css';
 
 const socket = io('http://localhost:5000');
-const API_URL = 'http://localhost:5000/api';
 
 function App() {
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [playingVideo, setPlayingVideo] = useState(null);
+
+  // Input states
   const [url, setUrl] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [metadata, setMetadata] = useState(null);
@@ -21,6 +26,7 @@ function App() {
   const [tasks, setTasks] = useState({
     queue: [],
     active: [],
+    paused: [],
     completed: []
   });
 
@@ -28,17 +34,9 @@ function App() {
   useEffect(() => {
     fetchQueue();
 
-    socket.on('progress', (updatedTask) => {
-      updateTaskInState(updatedTask);
-    });
-
-    socket.on('taskAdded', (newTask) => {
-      fetchQueue(); // Simplest way to sync order
-    });
-
-    socket.on('taskDeleted', ({ id }) => {
-      fetchQueue();
-    });
+    socket.on('progress', updateTaskInState);
+    socket.on('taskAdded', fetchQueue);
+    socket.on('taskDeleted', fetchQueue);
 
     return () => {
       socket.off('progress');
@@ -49,8 +47,7 @@ function App() {
 
   const fetchQueue = async () => {
     try {
-      const res = await axios.get(`${API_URL}/queue`);
-      // res.data has { queue, active, completed }
+      const res = await api.getQueue();
       setTasks(res.data);
     } catch (err) {
       console.error("Failed to fetch queue", err);
@@ -59,31 +56,26 @@ function App() {
 
   const updateTaskInState = (updatedTask) => {
     setTasks(prev => {
-      // We need to intelligently update the task wherever it is
-      // Or just lazy re-fetch if status changed meaningfully?
-      // Let's try to update in place for performance
-      const newActive = prev.active.map(t => t.id === updatedTask.id ? updatedTask : t);
+      const isTerminal = ['completed', 'failed', 'cancelled'].includes(updatedTask.status);
 
-      // If it wasn't in active, maybe it was in queue?
-      // If status became 'downloading' from 'queued', it should move.
-      // For simplicity in this "MVP pro", re-fetch if status changes to/from terminal states
-      if (updatedTask.status === 'completed' || updatedTask.status === 'failed') {
-        // Delay slightly to show 100% then move
+      if (isTerminal) {
         setTimeout(fetchQueue, 1000);
-        return prev;
       }
 
-      return {
-        ...prev,
-        active: newActive
-      };
+      // Update active list optimistically
+      const newActive = prev.active.map(t => t.id === updatedTask.id ? updatedTask : t);
+      if (prev.active.find(t => t.id === updatedTask.id)) {
+        return { ...prev, active: newActive };
+      }
+
+      return prev;
     });
   };
 
   // URL Analysis
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (url && (url.includes('youtube.com') || url.includes('youtu.be'))) {
+      if (url && (url.includes('http') || url.includes('www'))) {
         analyzeUrl(url);
       } else {
         setMetadata(null);
@@ -96,9 +88,8 @@ function App() {
     setAnalyzing(true);
     setMetadata(null);
     try {
-      const res = await axios.post(`${API_URL}/info`, { url: targetUrl });
+      const res = await api.getInfo(targetUrl);
       setMetadata(res.data);
-      // Defaults
       setFormat('mp4');
       if (res.data.formats && res.data.formats.length > 0) {
         const best = res.data.formats.find(f => f.type === 'video')?.format_id || res.data.formats[0].format_id;
@@ -113,202 +104,157 @@ function App() {
 
   const handleDownload = async () => {
     if (!metadata) return;
-
     try {
-      await axios.post(`${API_URL}/download`, {
+      await api.download({
         url,
         options: {
           isAudio: format === 'mp3',
           formatId: selectedFormatId,
           title: metadata.title,
           isPlaylist: metadata.is_playlist,
-          // If docker, customPath ignored by backend usually, but passed anyway
           outputPath: customPath
         }
       });
-
-      // Clear input
       setUrl('');
       setMetadata(null);
-      // Wait for socket to update queue
     } catch (err) {
-      alert('Failed to start download: ' + err.message);
+      alert('Failed: ' + err.message);
     }
+  };
+
+  const handlePause = async (id) => {
+    await api.pause(id);
+    fetchQueue();
+  };
+
+  const handleResume = async (id) => {
+    await api.resume(id);
+    fetchQueue();
   };
 
   const handleCancel = async (id) => {
-    try {
-      await axios.post(`${API_URL}/cancel`, { id });
-      fetchQueue();
-    } catch (e) {
-      console.error(e);
-    }
+    await api.cancel(id);
+    fetchQueue();
   };
 
   const handleDelete = async (id, path) => {
-    if (confirm('Are you sure you want to delete this file?')) {
-      try {
-        await axios.post(`${API_URL}/delete-file`, { id, path });
-        fetchQueue();
-      } catch (e) {
-        console.error(e);
-      }
+    if (confirm('Delete this file permanently?')) {
+      await api.deleteFile(id, path);
+      fetchQueue();
     }
   };
 
   const handleBrowse = async () => {
     try {
-      const res = await axios.post(`${API_URL}/browse`);
+      const res = await api.browse();
       if (res.data.path) setCustomPath(res.data.path);
     } catch (e) {
-      alert('Browse not available (or docker mode)');
+      alert('Browse not available');
     }
   };
 
-  // Combine Active and Queue for display?
-  // Or separate sections.
-  const allActive = [...tasks.active, ...tasks.queue];
+  const allActive = [...tasks.active, ...tasks.queue, ...tasks.paused];
 
   return (
-    <div className="min-h-screen bg-[#030712] text-slate-200 font-sans selection:bg-violet-500/30">
+    <div className="min-h-screen bg-[#030712] text-slate-200 font-sans selection:bg-violet-500/30 flex overflow-hidden">
+
       {/* Background Gradients */}
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-violet-600/20 rounded-full blur-[128px]" />
-        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-[128px]" />
+      <div className="fixed inset-0 pointer-events-none z-0">
+        <div className="absolute top-0 left-1/4 w-[800px] h-[800px] bg-violet-600/5 rounded-full blur-[128px]" />
+        <div className="absolute bottom-0 right-1/4 w-[800px] h-[800px] bg-indigo-600/5 rounded-full blur-[128px]" />
       </div>
 
-      <div className="relative max-w-6xl mx-auto p-6 md:p-12">
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        isOpen={isSidebarOpen}
+        setIsOpen={setIsSidebarOpen}
+      />
 
-        {/* Header */}
-        <header className="flex items-center justify-between mb-12">
-          <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-br from-violet-600 to-indigo-600 p-3 rounded-2xl shadow-lg shadow-violet-500/20">
-              <Youtube className="text-white" size={28} />
-            </div>
-            <div>
-              <h1 className="text-3xl font-extrabold tracking-tight text-white">
-                sersif<span className="text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-indigo-400">Tube</span>
-              </h1>
-              <p className="text-slate-500 text-sm font-medium">Professional Downloader</p>
-            </div>
-          </div>
+      <div className="flex-1 flex flex-col relative z-10 h-screen overflow-hidden transition-all duration-300 md:ml-64">
+        <Navbar toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} />
 
-          {/* Stats (Mock for now) */}
-          <div className="hidden md:flex gap-6">
-            <div className="text-right">
-              <div className="text-2xl font-bold text-white">{tasks.completed.length}</div>
-              <div className="text-xs text-slate-500 uppercase font-bold tracking-wider">Completed</div>
-            </div>
-            <div className="text-right">
-              <div className="text-2xl font-bold text-violet-400">{tasks.queue.length + tasks.active.length}</div>
-              <div className="text-xs text-slate-500 uppercase font-bold tracking-wider">Active</div>
-            </div>
-          </div>
-        </header>
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 pt-20 custom-scrollbar">
+          <div className="max-w-5xl mx-auto">
 
-        {/* Main Input Area */}
-        <section className="mb-16">
-          <UrlInput
-            url={url}
-            setUrl={setUrl}
-            analyzing={analyzing}
-            metadata={metadata}
-            format={format}
-            setFormat={setFormat}
-            selectedFormatId={selectedFormatId}
-            setSelectedFormatId={setSelectedFormatId}
-            onDownload={handleDownload}
-            customPath={customPath}
-            onBrowse={handleBrowse}
-          />
-        </section>
+            {activeTab === 'dashboard' && (
+              <Dashboard
+                stats={{
+                  active: tasks.active.length,
+                  completed: tasks.completed.length
+                }}
+                url={url}
+                setUrl={setUrl}
+                analyzing={analyzing}
+                metadata={metadata}
+                format={format}
+                setFormat={setFormat}
+                selectedFormatId={selectedFormatId}
+                setSelectedFormatId={setSelectedFormatId}
+                customPath={customPath}
+                onBrowse={handleBrowse}
+                onDownload={handleDownload}
+              />
+            )}
 
-        {/* Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-
-          {/* Active Queue */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <List className="text-violet-500" />
-                Active Queue
-              </h2>
-              <span className="text-xs font-bold bg-slate-800 text-slate-400 px-2 py-1 rounded-full">{allActive.length}</span>
-            </div>
-
-            <div className="space-y-3">
-              {allActive.length === 0 ? (
-                <div className="text-center py-12 border-2 border-dashed border-slate-800 rounded-xl text-slate-600">
-                  <BarChart3 className="mx-auto mb-2 opacity-50" size={32} />
-                  <p>No active downloads</p>
+            {activeTab === 'dashboard' && (
+              <div className="mt-12 space-y-6">
+                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                  <span className="w-1 h-6 bg-violet-500 rounded-full" />
+                  Active Downloads
+                </h3>
+                <div className="grid grid-cols-1 gap-4">
+                  {allActive.length === 0 ? (
+                    <div className="p-12 border-2 border-dashed border-white/5 bg-white/5 rounded-3xl text-center text-slate-500 text-sm">
+                      Your queue is empty.
+                    </div>
+                  ) : (
+                    allActive.map(task => (
+                      <VideoItem
+                        key={task.id}
+                        task={task}
+                        onCancel={handleCancel}
+                        onPause={handlePause}
+                        onResume={handleResume}
+                      />
+                    ))
+                  )}
                 </div>
-              ) : (
-                allActive.map(task => (
-                  <VideoItem
-                    key={task.id}
-                    task={task}
-                    onCancel={handleCancel}
-                  />
-                ))
-              )}
-            </div>
-          </div>
+              </div>
+            )}
 
-          {/* History */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <CheckCircle2Icon className="text-emerald-500" />
-                History
-              </h2>
-              <button
-                className="text-xs font-bold text-red-400 hover:text-red-300 transition-colors"
-                onClick={() => setTasks(prev => ({ ...prev, completed: [] }))} // Local clear only for now
-              >
-                CLEAR ALL
-              </button>
-            </div>
-
-            <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-              {tasks.completed.length === 0 ? (
-                <div className="text-center py-12 border-2 border-dashed border-slate-800 rounded-xl text-slate-600">
-                  <p>No history yet</p>
+            {(activeTab === 'downloads' || activeTab === 'library') && (
+              <div className="space-y-6">
+                <h2 className="text-2xl font-bold text-white mb-6">Library</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {tasks.completed.length === 0 ? (
+                    <p className="text-slate-500 col-span-full text-center py-20 bg-white/5 rounded-3xl border border-white/5">No downloads yet.</p>
+                  ) : (
+                    tasks.completed.slice().reverse().map(task => (
+                      <VideoItem
+                        key={task.id}
+                        task={task}
+                        onDelete={handleDelete}
+                        onPlay={setPlayingVideo}
+                      />
+                    ))
+                  )}
                 </div>
-              ) : (
-                tasks.completed.slice().reverse().map(task => (
-                  <VideoItem
-                    key={task.id}
-                    task={task}
-                    onDelete={handleDelete}
-                  />
-                ))
-              )}
-            </div>
-          </div>
+              </div>
+            )}
 
-        </div>
+          </div>
+        </main>
       </div>
+
+      {playingVideo && (
+        <VideoPlayer
+          video={playingVideo}
+          onClose={() => setPlayingVideo(null)}
+        />
+      )}
     </div>
   );
 }
-
-// Icon helper since I missed importing it
-const CheckCircle2Icon = ({ className }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="24"
-    height="24"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <circle cx="12" cy="12" r="10" />
-    <path d="m9 12 2 2 4-4" />
-  </svg>
-);
 
 export default App;

@@ -13,143 +13,119 @@ app.use(express.json());
 
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    }
+    cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
 // ==========================
 // SOCKET EVENTS
 // ==========================
-queueManager.on('taskUpdated', (task) => {
-    io.emit('progress', task);
-});
-
-queueManager.on('taskAdded', (task) => {
-    io.emit('taskAdded', task);
-});
-
-queueManager.on('taskDeleted', (id) => {
-    io.emit('taskDeleted', { id });
-});
+queueManager.on('taskUpdated', (task) => io.emit('progress', task));
+queueManager.on('taskAdded', (task) => io.emit('taskAdded', task));
+queueManager.on('taskDeleted', (id) => io.emit('taskDeleted', { id }));
 
 // ==========================
 // API ROUTES
 // ==========================
 
 app.post('/api/info', async (req, res) => {
-    const { url } = req.body;
     try {
-        const info = await getInfo(url);
+        const info = await getInfo(req.body.url);
         res.json(info);
     } catch (error) {
-        console.error('[SERVER] /api/info error:', error);
-        res.status(500).json({ error: 'Failed to fetch video info', details: error.message });
+        res.status(500).json({ error: error.message });
     }
 });
 
-app.get('/api/queue', (req, res) => {
-    res.json(queueManager.getAllTasks());
-});
+app.get('/api/queue', (req, res) => res.json(queueManager.getAllTasks()));
 
 app.post('/api/download', async (req, res) => {
     const { url, options } = req.body;
-    // Options: { id, isAudio, formatId, outputPath, isPlaylist }
-
-    console.log('[SERVER] Download request:', url);
-
     try {
         if (options.isPlaylist === true) {
-            // We need to fetch metadata to get all entries
-            // The frontend might have sent basic metadata, but we need full list
             const info = await getInfo(url);
+            if (!info.entries) return res.status(400).json({ error: 'Playlist empty' });
 
-            if (!info.entries || info.entries.length === 0) {
-                return res.status(400).json({ error: 'Empty playlist or unable to fetch entries' });
-            }
-
-            const tasks = [];
-            info.entries.forEach((entry, index) => {
-                // Create a task for each video
-                const task = queueManager.addToQueue({
-                    url: entry.url || `https://www.youtube.com/watch?v=${entry.id}`,
+            info.entries.forEach(entry => {
+                queueManager.addToQueue({
+                    url: entry.url,
                     title: entry.title,
                     thumbnail: entry.thumbnail,
-                    playlistId: options.id,
-                    playlistTitle: info.title, // Pass playlist title
-                    options: {
-                        ...options,
-                        isPlaylist: false,
-                        id: undefined
-                    }
+                    playlistTitle: info.title,
+                    options: { ...options, isPlaylist: false }
                 });
-                tasks.push(task);
             });
-
-            res.json({ message: 'Playlist added to queue', tasks });
+            res.json({ message: 'Playlist queued' });
         } else {
-            // Single video
-            const task = queueManager.addToQueue({
-                url,
-                title: options.title || 'Unknown Video', // Frontend should ideally pass title
-                options
-            });
-            res.json({ message: 'Added to queue', taskId: task.id });
+            queueManager.addToQueue({ url, title: options.title, options });
+            res.json({ message: 'Queued' });
         }
     } catch (error) {
-        console.error('[SERVER] Download failed:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
 app.post('/api/cancel', (req, res) => {
-    const { id } = req.body;
-    const success = queueManager.cancelTask(id);
-    if (success) res.json({ message: 'Cancelled' });
-    else res.status(404).json({ error: 'Task not found or already completed' });
+    queueManager.cancelTask(req.body.id);
+    res.json({ message: 'Cancelled' });
+});
+
+app.post('/api/pause', (req, res) => {
+    queueManager.pauseTask(req.body.id);
+    res.json({ message: 'Paused' });
+});
+
+app.post('/api/resume', (req, res) => {
+    queueManager.resumeTask(req.body.id);
+    res.json({ message: 'Resumed' });
 });
 
 app.post('/api/delete-file', (req, res) => {
-    // Delete the file from disk + remove from history
-    const { id, path: filePath } = req.body;
-
-    // Attempt to delete physical file if path provided
-    if (filePath) {
-        try {
-            deleteFile(filePath);
-        } catch (e) {
-            console.error('File delete error:', e);
-        }
-    }
-
-    // Remove from queue history
-    queueManager.deleteTask(id);
+    if (req.body.path) deleteFile(req.body.path);
+    queueManager.deleteTask(req.body.id);
     res.json({ message: 'Deleted' });
 });
 
-
-// Folder Picker (Disabled in Docker)
 app.post('/api/browse', (req, res) => {
-    if (process.env.DOCKER_MODE === 'true') {
-        return res.json({ path: '/app/downloads' }); // Default docker path
-    }
-
+    if (process.env.DOCKER_MODE === 'true') return res.json({ path: '/downloads' });
     const { exec } = require('child_process');
     const scriptPath = path.join(__dirname, 'folder-picker.ps1');
-    const cmd = `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`;
-
-    console.log('[SERVER] Opening folder picker...');
-    exec(cmd, { timeout: 60000 }, (error, stdout, stderr) => {
-        if (error) {
-            console.error('[SERVER] Folder picker error:', error.message);
-            return res.status(500).json({ error: 'Failed' });
-        }
-        res.json({ path: stdout.trim() });
+    exec(`powershell.exe -File "${scriptPath}"`, (err, stdout) => {
+        res.json({ path: stdout?.trim() });
     });
 });
 
-const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+// STREAMING ENDPOINT for Video Player
+app.get('/api/stream', (req, res) => {
+    const videoPath = req.query.path;
+    if (!videoPath || !fs.existsSync(videoPath)) return res.status(404).send('Not found');
+
+    const stat = fs.statSync(videoPath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+
+    if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        const chunksize = (end - start) + 1;
+        const file = fs.createReadStream(videoPath, { start, end });
+        const head = {
+            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': chunksize,
+            'Content-Type': 'video/mp4',
+        };
+        res.writeHead(206, head);
+        file.pipe(res);
+    } else {
+        const head = {
+            'Content-Length': fileSize,
+            'Content-Type': 'video/mp4',
+        };
+        res.writeHead(200, head);
+        fs.createReadStream(videoPath).pipe(res);
+    }
 });
+
+const PORT = 5000;
+server.listen(PORT, () => console.log(`Server running on ${PORT}`));

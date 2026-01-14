@@ -6,12 +6,12 @@ class QueueManager extends EventEmitter {
         super();
         this.queue = [];
         this.active = new Map();
-        this.completed = new Map(); // Store history if needed, or just let frontend handle it
-        this.maxConcurrent = 3; // Allow 3 concurrent downloads
+        this.paused = new Map();
+        this.completed = new Map();
+        this.maxConcurrent = 3;
     }
 
     addToQueue(item) {
-        // item: { url, options: { isAudio, formatId, path, ... }, metadata }
         const id = uuidv4();
         const task = {
             id,
@@ -38,21 +38,18 @@ class QueueManager extends EventEmitter {
         this.emit('taskUpdated', task);
 
         try {
-            // We expect a downloader function to be passed or attached
-            // For now, we emit an event that the service listens to
             this.emit('startDownload', task);
         } catch (error) {
-            this.handleError(task.id, error);
+            console.error('[QUEUE] Error starting download:', error);
         }
     }
 
     updateProgress(id, progressData) {
-        // progressData: { progress, speed, eta, etc. }
         const task = this.active.get(id);
         if (task) {
             task.progress = progressData.progress;
             task.status = 'downloading';
-            Object.assign(task, progressData); // Merge other stats
+            Object.assign(task, progressData);
             this.emit('taskUpdated', task);
         }
     }
@@ -64,9 +61,9 @@ class QueueManager extends EventEmitter {
             task.completedAt = Date.now();
             task.result = result;
             this.active.delete(id);
-            this.completed.set(id, task); // Optional: keep history
+            this.completed.set(id, task);
             this.emit('taskUpdated', task);
-            this.processQueue(); // Start next
+            this.processQueue();
         }
     }
 
@@ -83,7 +80,6 @@ class QueueManager extends EventEmitter {
     }
 
     cancelTask(id) {
-        // If in queue
         const queueIndex = this.queue.findIndex(t => t.id === id);
         if (queueIndex !== -1) {
             const task = this.queue[queueIndex];
@@ -93,12 +89,9 @@ class QueueManager extends EventEmitter {
             return true;
         }
 
-        // If active
         if (this.active.has(id)) {
             const task = this.active.get(id);
-            // Emitting 'cancel' event for the service to kill the process
             this.emit('stopDownload', id);
-
             task.status = 'cancelled';
             this.active.delete(id);
             this.emit('taskUpdated', task);
@@ -106,14 +99,51 @@ class QueueManager extends EventEmitter {
             return true;
         }
 
+        if (this.paused.has(id)) {
+            const task = this.paused.get(id);
+            task.status = 'cancelled';
+            this.paused.delete(id);
+            this.emit('taskUpdated', task);
+            return true;
+        }
+
         return false;
     }
 
     deleteTask(id) {
-        // Just remove from history/state
         if (this.completed.has(id)) {
             this.completed.delete(id);
             this.emit('taskDeleted', id);
+            return true;
+        }
+        return false;
+    }
+
+    pauseTask(id) {
+        if (this.active.has(id)) {
+            const task = this.active.get(id);
+            this.emit('stopDownload', id);
+
+            task.status = 'paused';
+            this.active.delete(id);
+            this.paused.set(id, task);
+
+            this.emit('taskUpdated', task);
+            this.processQueue();
+            return true;
+        }
+        return false;
+    }
+
+    resumeTask(id) {
+        if (this.paused.has(id)) {
+            const task = this.paused.get(id);
+            this.paused.delete(id);
+
+            task.status = 'queued';
+            this.queue.unshift(task);
+            this.emit('taskUpdated', task);
+            this.processQueue();
             return true;
         }
         return false;
@@ -123,6 +153,7 @@ class QueueManager extends EventEmitter {
         return {
             queue: this.queue,
             active: Array.from(this.active.values()),
+            paused: Array.from(this.paused.values()),
             completed: Array.from(this.completed.values())
         };
     }
