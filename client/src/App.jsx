@@ -8,7 +8,7 @@ import { Modal } from './components/Modal';
 import { api } from './services/api';
 import './index.css';
 
-const socket = io('http://localhost:5000');
+const socket = io(import.meta.env.VITE_API_URL);
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');

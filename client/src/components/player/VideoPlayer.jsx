@@ -5,7 +5,7 @@ export function VideoPlayer({ video, onClose }) {
     if (!video) return null;
 
     // Stream URL via server API
-    const videoUrl = `http://localhost:5000/api/stream?path=${encodeURIComponent(video.result?.path)}`;
+    const videoUrl = `${import.meta.env.VITE_API_URL}/api/stream?path=${encodeURIComponent(video.result?.path)}`;
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8 animate-in fade-in duration-300">
