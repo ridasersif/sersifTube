@@ -2,11 +2,27 @@ version: '3.8'
 
 services:
   server:
-    build: ./server
+    build: .
+    command: npm run server
     ports:
-      - "7860:7860"
+      - "5000:5000"
     environment:
-      - PORT=7860
+      - PORT=5000
       - DOCKER_MODE=true
     volumes:
-      - ./server/downloads:/usr/src/app/downloads
+      - .:/app
+      - /app/node_modules
+      - ./server/downloads:/app/downloads
+
+  client:
+    build: .
+    command: npm run client
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://localhost:5000
+    volumes:
+      - .:/app
+      - /app/node_modules
+    depends_on:
+      - server
